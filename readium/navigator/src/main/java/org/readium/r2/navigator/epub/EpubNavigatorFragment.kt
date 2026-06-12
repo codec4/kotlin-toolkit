@@ -52,6 +52,7 @@ import org.readium.r2.navigator.OverflowableNavigator
 import org.readium.r2.navigator.R
 import org.readium.r2.navigator.R2BasicWebView
 import org.readium.r2.navigator.RestorationNotSupportedException
+import org.readium.r2.navigator.ScrollModeResourceTurnGesturePolicy
 import org.readium.r2.navigator.SelectableNavigator
 import org.readium.r2.navigator.Selection
 import org.readium.r2.navigator.TargetElementData
@@ -188,6 +189,11 @@ public class EpubNavigatorFragment internal constructor(
         var disablePageTurnsWhileScrolling: Boolean,
 
         /**
+         * Decides whether a horizontal drag in scroll mode should turn the resource.
+         */
+        var scrollModeResourceTurnGesturePolicy: ScrollModeResourceTurnGesturePolicy,
+
+        /**
          * Custom [ActionMode.Callback] to be used when the user selects content.
          *
          * Provide one if you want to customize the selection context menu items.
@@ -218,6 +224,8 @@ public class EpubNavigatorFragment internal constructor(
             readiumCssRsProperties: RsProperties = RsProperties(),
             decorationTemplates: HtmlDecorationTemplates = HtmlDecorationTemplates.defaultTemplates(),
             disablePageTurnsWhileScrolling: Boolean = false,
+            scrollModeResourceTurnGesturePolicy: ScrollModeResourceTurnGesturePolicy =
+                ScrollModeResourceTurnGesturePolicy.Legacy,
             selectionActionModeCallback: ActionMode.Callback? = null,
             shouldApplyInsetsPadding: Boolean? = true,
         ) : this(
@@ -225,6 +233,7 @@ public class EpubNavigatorFragment internal constructor(
             readiumCssRsProperties = readiumCssRsProperties,
             decorationTemplates = decorationTemplates,
             disablePageTurnsWhileScrolling = disablePageTurnsWhileScrolling,
+            scrollModeResourceTurnGesturePolicy = scrollModeResourceTurnGesturePolicy,
             selectionActionModeCallback = selectionActionModeCallback,
             shouldApplyInsetsPadding = shouldApplyInsetsPadding,
             disableSelectionWhenProtected = true,
