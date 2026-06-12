@@ -33,7 +33,6 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.withStarted
 import androidx.viewpager.widget.ViewPager
 import kotlin.math.ceil
-import kotlin.math.roundToInt
 import kotlin.reflect.KClass
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -1214,10 +1213,8 @@ public class EpubNavigatorFragment internal constructor(
         )
     }
 
-    @Suppress("DEPRECATION")
     private fun readerWebViewContentHeight(webView: R2WebView): Int? =
-        (webView.contentHeight * webView.scale)
-            .roundToInt()
+        webView.contentHeight
             .takeIf { it > 0 }
 
     private fun contentHeightIsStable(
