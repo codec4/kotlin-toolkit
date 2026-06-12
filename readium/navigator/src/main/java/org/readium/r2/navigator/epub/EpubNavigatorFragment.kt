@@ -33,6 +33,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.withStarted
 import androidx.viewpager.widget.ViewPager
 import kotlin.math.ceil
+import kotlin.math.roundToInt
 import kotlin.reflect.KClass
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -42,6 +43,7 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import org.json.JSONArray
 import org.json.JSONObject
 import org.readium.r2.navigator.DecorableNavigator
 import org.readium.r2.navigator.Decoration
@@ -51,6 +53,7 @@ import org.readium.r2.navigator.NavigatorFragment
 import org.readium.r2.navigator.OverflowableNavigator
 import org.readium.r2.navigator.R
 import org.readium.r2.navigator.R2BasicWebView
+import org.readium.r2.navigator.R2WebView
 import org.readium.r2.navigator.RestorationNotSupportedException
 import org.readium.r2.navigator.ScrollModeResourceTurnGesturePolicy
 import org.readium.r2.navigator.SelectableNavigator
@@ -313,6 +316,59 @@ public class EpubNavigatorFragment internal constructor(
         val page = currentReflowablePageFragment ?: return null
         page.awaitLoaded()
         return page.runJavaScriptSuspend(script)
+    }
+
+    /**
+     * Returns the current locator enriched with Android WebView scroll state.
+     *
+     * This is useful for callers which need to synchronously capture a close-time position, where a
+     * coroutine-based locator refresh is not available anymore.
+     */
+    public fun currentLocatorWithNativeScroll(): Locator? {
+        val locator = currentLocator.value
+        val webView = currentReflowablePageFragment?.webView ?: return locator
+        return nativeScrollSnapshot(webView)?.let(locator::withNativeScrollSnapshot) ?: locator
+    }
+
+    /**
+     * Returns the current locator enriched with a stable visible-element anchor and native WebView
+     * scroll state when available.
+     */
+    public suspend fun currentLocatorWithPrecisePosition(): Locator? {
+        var locator = currentLocatorWithNativeScroll() ?: return null
+        val webView = currentReflowablePageFragment?.webView ?: return locator
+        val anchorLocator = firstVisibleElementLocator() ?: return locator
+        val cssSelector = anchorLocator.cssSelector ?: return locator
+        val anchor = captureViewportAnchor(webView, cssSelector) ?: return locator
+        locator = locator.withViewportAnchor(anchorLocator = anchorLocator, anchor = anchor)
+        return locator
+    }
+
+    /**
+     * Restores a locator containing a precise Android EPUB viewport position and waits until the
+     * WebView scroll state is stable enough to display.
+     */
+    public suspend fun restorePrecisePosition(
+        locator: Locator,
+        options: EpubPrecisePositionRestoreOptions = EpubPrecisePositionRestoreOptions(),
+    ): EpubPrecisePositionRestoreResult {
+        val anchor = EpubViewportAnchor.fromLocator(locator)
+        val snapshot = EpubNativeScrollSnapshot.fromLocator(locator)
+
+        if (anchor == null && snapshot == null) {
+            return EpubPrecisePositionRestoreResult(reason = "missingPrecisePosition", attempts = 0)
+        }
+
+        if (anchor != null) {
+            val anchorResult = restoreViewportAnchor(locator, anchor, options)
+            if (anchorResult.viewportAnchorResult?.targetReached(options.scrollTolerancePx) == true) {
+                return anchorResult
+            }
+        }
+
+        return snapshot
+            ?.let { restoreNativeScroll(locator, it, options) }
+            ?: EpubPrecisePositionRestoreResult(reason = "missingNativeScrollFallback", attempts = 0)
     }
 
     private val viewModel: EpubNavigatorViewModel by viewModels {
@@ -977,6 +1033,598 @@ public class EpubNavigatorFragment internal constructor(
     private fun locatorToResourceAtIndex(index: Int): Locator? =
         readingOrder.getOrNull(index)
             ?.let { publication.locatorFromLink(it) }
+
+    private data class AwaitedReflowableWebView(
+        val webView: R2WebView,
+        val attempts: Int,
+    )
+
+    private suspend fun restoreViewportAnchor(
+        locator: Locator,
+        anchor: EpubViewportAnchor,
+        options: EpubPrecisePositionRestoreOptions,
+    ): EpubPrecisePositionRestoreResult {
+        go(locator, animated = false)
+        val awaited = awaitCurrentReflowableWebView(options)
+            ?: return EpubPrecisePositionRestoreResult(
+                reason = "missingVisibleWebView",
+                attempts = options.maxWaitAttempts,
+            )
+
+        val result = applyViewportAnchor(awaited.webView, anchor)
+        return EpubPrecisePositionRestoreResult(
+            reason = when {
+                result?.targetReached(options.scrollTolerancePx) == true -> "viewportAnchorRestored"
+                result == null -> "viewportAnchorNoResult"
+                else -> "viewportAnchorMissed"
+            },
+            attempts = awaited.attempts,
+            viewportAnchorResult = result,
+        )
+    }
+
+    private suspend fun restoreNativeScroll(
+        locator: Locator,
+        snapshot: EpubNativeScrollSnapshot,
+        options: EpubPrecisePositionRestoreOptions,
+    ): EpubPrecisePositionRestoreResult {
+        go(locator, animated = false)
+        val awaited = awaitCurrentReflowableWebView(options)
+            ?: return EpubPrecisePositionRestoreResult(
+                reason = "missingVisibleWebView",
+                attempts = options.maxWaitAttempts,
+            )
+
+        var previousContentHeight: Int? = null
+        var stableContentHeightAttempts = 0
+        var stableScrollAttempts = 0
+        var lastResult: EpubNativeScrollRestoreResult? = null
+        var savedLayoutReady = false
+
+        for (attempt in 0..options.settleMaxAttempts) {
+            val result = applyNativeScrollSnapshot(awaited.webView, snapshot, options)
+            lastResult = result
+            val contentHeight = result?.contentHeight
+            stableContentHeightAttempts =
+                if (contentHeight != null && contentHeightIsStable(previousContentHeight, contentHeight, options)) {
+                    stableContentHeightAttempts + 1
+                } else {
+                    0
+                }
+            previousContentHeight = contentHeight
+            savedLayoutReady = result
+                ?.let {
+                    snapshot.savedLayoutIsReadyForRestore(
+                        currentContentHeight = it.contentHeight,
+                        currentViewportWidth = it.viewportWidth,
+                        currentViewportHeight = it.viewportHeight,
+                        heightTolerancePx = options.heightTolerancePx,
+                        viewportTolerancePx = options.viewportTolerancePx,
+                    )
+                }
+                ?: false
+            stableScrollAttempts =
+                if (result?.targetWasStable(options.scrollTolerancePx) == true) {
+                    stableScrollAttempts + 1
+                } else {
+                    0
+                }
+            val settled = result?.targetReached(options.scrollTolerancePx) == true &&
+                savedLayoutReady &&
+                stableContentHeightAttempts >= options.stableContentAttempts &&
+                stableScrollAttempts >= options.stableScrollAttempts
+
+            if (settled) {
+                return EpubPrecisePositionRestoreResult(
+                    reason = "settled",
+                    attempts = attempt + 1,
+                    nativeScrollResult = result,
+                    savedLayoutReady = savedLayoutReady,
+                    stableContentHeightAttempts = stableContentHeightAttempts,
+                    stableScrollAttempts = stableScrollAttempts,
+                )
+            }
+
+            if (attempt < options.settleMaxAttempts) {
+                delay(options.settleRetryDelayMs)
+            }
+        }
+
+        return EpubPrecisePositionRestoreResult(
+            reason = "maxAttempts",
+            attempts = options.settleMaxAttempts + 1,
+            nativeScrollResult = lastResult,
+            savedLayoutReady = savedLayoutReady,
+            stableContentHeightAttempts = stableContentHeightAttempts,
+            stableScrollAttempts = stableScrollAttempts,
+        )
+    }
+
+    private suspend fun awaitCurrentReflowableWebView(
+        options: EpubPrecisePositionRestoreOptions,
+    ): AwaitedReflowableWebView? {
+        for (attempt in 0..options.maxWaitAttempts) {
+            val page = currentReflowablePageFragment
+            val webView = page?.webView
+            if (page?.isLoaded?.value == true && webView != null) {
+                return AwaitedReflowableWebView(webView, attempt + 1)
+            }
+            if (attempt < options.maxWaitAttempts) {
+                delay(options.retryDelayMs)
+            }
+        }
+        return null
+    }
+
+    private fun nativeScrollSnapshot(webView: R2WebView): EpubNativeScrollSnapshot? {
+        val contentHeight = readerWebViewContentHeight(webView)
+        val vertical = webView.scrollY != 0 ||
+            webView.canScrollVertically(1) ||
+            webView.canScrollVertically(-1)
+        val horizontal = webView.scrollX != 0 ||
+            webView.canScrollHorizontally(1) ||
+            webView.canScrollHorizontally(-1)
+        val progression = if (vertical) {
+            contentHeight
+                ?.takeIf { it > 0 }
+                ?.let { (webView.scrollY.toDouble() / it).coerceIn(0.0, 1.0) }
+        } else {
+            null
+        }
+        return EpubNativeScrollSnapshot(
+            scrollX = webView.scrollX,
+            scrollY = webView.scrollY,
+            viewportWidth = webView.width,
+            viewportHeight = webView.height,
+            contentHeight = contentHeight,
+            progression = progression,
+            axis = when {
+                vertical -> "vertical"
+                horizontal -> "horizontal"
+                else -> "none"
+            },
+        )
+    }
+
+    private fun applyNativeScrollSnapshot(
+        webView: R2WebView,
+        snapshot: EpubNativeScrollSnapshot,
+        options: EpubPrecisePositionRestoreOptions,
+    ): EpubNativeScrollRestoreResult? {
+        val contentHeight = readerWebViewContentHeight(webView)
+        val targetScrollY = snapshot.targetScrollYForContentHeight(
+            currentContentHeight = contentHeight,
+            currentViewportWidth = webView.width,
+            currentViewportHeight = webView.height,
+            heightTolerancePx = options.heightTolerancePx,
+            viewportTolerancePx = options.viewportTolerancePx,
+        )
+        val scrollYBeforeApply = webView.scrollY
+        webView.scrollTo(
+            snapshot.scrollX.coerceAtLeast(0),
+            targetScrollY,
+        )
+        return EpubNativeScrollRestoreResult(
+            contentHeight = contentHeight,
+            viewportWidth = webView.width,
+            viewportHeight = webView.height,
+            targetScrollY = targetScrollY,
+            scrollYBeforeApply = scrollYBeforeApply,
+            actualScrollY = webView.scrollY,
+        )
+    }
+
+    @Suppress("DEPRECATION")
+    private fun readerWebViewContentHeight(webView: R2WebView): Int? =
+        (webView.contentHeight * webView.scale)
+            .roundToInt()
+            .takeIf { it > 0 }
+
+    private fun contentHeightIsStable(
+        previous: Int?,
+        current: Int,
+        options: EpubPrecisePositionRestoreOptions,
+    ): Boolean =
+        previous != null && kotlin.math.abs(previous - current) <= options.heightTolerancePx
+
+    private suspend fun captureViewportAnchor(
+        webView: R2WebView,
+        cssSelector: String,
+    ): EpubViewportAnchor? {
+        val result = webView.runJavaScriptSuspend(viewportAnchorCaptureScript(cssSelector))
+        val payload = decodeJavascriptStringResult(result) ?: return null
+        return runCatching {
+            EpubViewportAnchor.fromCaptureJson(cssSelector, JSONObject(payload))
+        }.getOrNull()
+    }
+
+    private suspend fun applyViewportAnchor(
+        webView: R2WebView,
+        anchor: EpubViewportAnchor,
+    ): EpubViewportAnchorRestoreResult? {
+        val result = webView.runJavaScriptSuspend(viewportAnchorRestoreScript(anchor))
+        return parseViewportAnchorRestoreResult(result, anchor.elementTop)
+    }
+
+    private fun viewportAnchorCaptureScript(cssSelector: String): String {
+        val selector = JSONObject.quote(cssSelector)
+        return """
+            (function () {
+                var selector = $selector;
+                function cssEscape(value) {
+                    if (window.CSS && window.CSS.escape) {
+                        return window.CSS.escape(value);
+                    }
+                    return String(value).replace(/([^a-zA-Z0-9_-])/g, '\\$1');
+                }
+                function attributeSelector(name, value) {
+                    var escaped = String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+                    return '[' + name + '="' + escaped + '"]';
+                }
+                function stableSelector(element) {
+                    var id = element.getAttribute('id') || '';
+                    if (id && !/^player[0-9]*$/i.test(id)) {
+                        return '#' + cssEscape(id);
+                    }
+                    var dataUri = element.getAttribute('data-uri');
+                    if (dataUri) {
+                        return attributeSelector('data-uri', dataUri);
+                    }
+                    var chaucerId = element.getAttribute('data-chaucer-element-id');
+                    if (chaucerId) {
+                        return attributeSelector('data-chaucer-element-id', chaucerId);
+                    }
+                    return null;
+                }
+                function isAnchorCandidate(element) {
+                    var tag = (element.tagName || '').toLowerCase();
+                    return tag === 'h1' ||
+                        tag === 'h2' ||
+                        tag === 'h3' ||
+                        tag === 'h4' ||
+                        tag === 'h5' ||
+                        tag === 'h6' ||
+                        tag === 'p' ||
+                        tag === 'figure' ||
+                        tag === 'figcaption' ||
+                        tag === 'img' ||
+                        tag === 'li' ||
+                        tag === 'table' ||
+                        tag === 'blockquote' ||
+                        tag === 'aside';
+                }
+                function isMediaElement(element) {
+                    var tag = (element.tagName || '').toLowerCase();
+                    if (tag === 'iframe' || tag === 'video' || tag === 'audio' ||
+                        tag === 'canvas' || tag === 'object' || tag === 'embed') {
+                        return true;
+                    }
+                    var id = element.getAttribute('id') || '';
+                    if (/^player[0-9]*$/i.test(id)) {
+                        return true;
+                    }
+                    var className = String(element.getAttribute('class') || '');
+                    if (/\b(vjs|video-js|__embedpearsonvideoplayer__)\b/i.test(className)) {
+                        return true;
+                    }
+                    return !!(element.closest && element.closest('figure.video'));
+                }
+                function findAnchor(win) {
+                    var doc = null;
+                    try {
+                        doc = win.document;
+                    } catch (error) {
+                        return null;
+                    }
+                    if (!doc) {
+                        return null;
+                    }
+                    var element = null;
+                    try {
+                        element = selector ? doc.querySelector(selector) : null;
+                    } catch (error) {
+                        element = null;
+                    }
+                    if (element) {
+                        return { element: element, win: win };
+                    }
+                    var frames = [];
+                    try {
+                        frames = doc.querySelectorAll('iframe');
+                    } catch (error) {
+                        frames = [];
+                    }
+                    for (var index = 0; index < frames.length; index += 1) {
+                        var child = null;
+                        try {
+                            child = frames[index].contentWindow;
+                        } catch (error) {
+                            child = null;
+                        }
+                        if (!child) {
+                            continue;
+                        }
+                        var found = findAnchor(child);
+                        if (found) {
+                            return found;
+                        }
+                    }
+                    return null;
+                }
+                function rectInRoot(element, win) {
+                    var rect = element.getBoundingClientRect();
+                    var top = rect.top;
+                    var left = rect.left;
+                    while (win && win !== window) {
+                        var frame = win.frameElement;
+                        if (!frame) {
+                            break;
+                        }
+                        var frameRect = frame.getBoundingClientRect();
+                        top += frameRect.top;
+                        left += frameRect.left;
+                        win = win.parent;
+                    }
+                    return { top: top, left: left };
+                }
+                function isVisibleInRoot(element, win) {
+                    var rect = rectInRoot(element, win);
+                    var bounds = element.getBoundingClientRect();
+                    return bounds.width > 0 &&
+                        bounds.height > 0 &&
+                        rect.top < window.innerHeight &&
+                        rect.top + bounds.height > 0;
+                }
+                function stableAncestor(element) {
+                    var current = element;
+                    while (current && current.nodeType === 1) {
+                        var tag = (current.tagName || '').toLowerCase();
+                        if (tag === 'body' || tag === 'html') {
+                            break;
+                        }
+                        var selector = stableSelector(current);
+                        if (selector && isAnchorCandidate(current) && !isMediaElement(current)) {
+                            return { element: current, selector: selector };
+                        }
+                        current = current.parentElement;
+                    }
+                    return null;
+                }
+                function stableVisibleAnchor(win) {
+                    var doc = win.document;
+                    var candidates = [];
+                    try {
+                        candidates = doc.querySelectorAll([
+                            'h1[id]',
+                            'h2[id]',
+                            'h3[id]',
+                            'h4[id]',
+                            'h5[id]',
+                            'h6[id]',
+                            'p[id]',
+                            'figure[id]',
+                            'img[id]',
+                            'li[id]',
+                            'table[id]',
+                            'blockquote[id]',
+                            'aside[id]',
+                            'h1[data-uri]',
+                            'h2[data-uri]',
+                            'h3[data-uri]',
+                            'h4[data-uri]',
+                            'h5[data-uri]',
+                            'h6[data-uri]',
+                            'p[data-uri]',
+                            'figure[data-uri]',
+                            'figcaption[data-uri]',
+                            'img[data-uri]',
+                            'li[data-uri]',
+                            'table[data-uri]',
+                            'blockquote[data-uri]',
+                            'aside[data-uri]',
+                            'h1[data-chaucer-element-id]',
+                            'h2[data-chaucer-element-id]',
+                            'h3[data-chaucer-element-id]',
+                            'h4[data-chaucer-element-id]',
+                            'h5[data-chaucer-element-id]',
+                            'h6[data-chaucer-element-id]',
+                            'p[data-chaucer-element-id]',
+                            'figure[data-chaucer-element-id]',
+                            'figcaption[data-chaucer-element-id]',
+                            'img[data-chaucer-element-id]',
+                            'li[data-chaucer-element-id]',
+                            'table[data-chaucer-element-id]',
+                            'blockquote[data-chaucer-element-id]',
+                            'aside[data-chaucer-element-id]'
+                        ].join(','));
+                    } catch (error) {
+                        candidates = [];
+                    }
+                    var bestInViewport = null;
+                    var bestAboveViewport = null;
+                    for (var index = 0; index < candidates.length; index += 1) {
+                        var candidate = candidates[index];
+                        if (!isAnchorCandidate(candidate) ||
+                            isMediaElement(candidate) ||
+                            !isVisibleInRoot(candidate, win)) {
+                            continue;
+                        }
+                        var selector = stableSelector(candidate);
+                        if (selector) {
+                            var rect = rectInRoot(candidate, win);
+                            var entry = { element: candidate, selector: selector, top: rect.top };
+                            if (rect.top >= 0) {
+                                if (!bestInViewport || rect.top < bestInViewport.top) {
+                                    bestInViewport = entry;
+                                }
+                            } else if (!bestAboveViewport || rect.top > bestAboveViewport.top) {
+                                bestAboveViewport = entry;
+                            }
+                        }
+                    }
+                    return bestInViewport || bestAboveViewport;
+                }
+                var found = findAnchor(window);
+                if (!found) {
+                    return null;
+                }
+                var stable = stableVisibleAnchor(found.win) || stableAncestor(found.element);
+                if (!stable) {
+                    return null;
+                }
+                var rect = rectInRoot(stable.element, found.win);
+                var scroller = document.scrollingElement || document.documentElement || document.body;
+                var scrollY = Math.round(window.scrollY || (scroller && scroller.scrollTop) || 0);
+                var scrollX = Math.round(window.scrollX || (scroller && scroller.scrollLeft) || 0);
+                var vertical = scrollY !== 0 || (scroller && scroller.scrollHeight > window.innerHeight);
+                return JSON.stringify({
+                    cssSelector: stable.selector,
+                    elementTop: rect.top,
+                    elementLeft: rect.left,
+                    viewportWidth: window.innerWidth,
+                    viewportHeight: window.innerHeight,
+                    scrollX: scrollX,
+                    scrollY: scrollY,
+                    axis: vertical ? "vertical" : "horizontal"
+                });
+            })();
+        """.trimIndent()
+    }
+
+    private fun viewportAnchorRestoreScript(anchor: EpubViewportAnchor): String {
+        val selector = JSONObject.quote(anchor.cssSelector)
+        val targetTop = anchor.elementTop.toJsNumber()
+        return """
+            (function () {
+                var selector = $selector;
+                var targetTop = $targetTop;
+                function findAnchor(win) {
+                    var doc = null;
+                    try {
+                        doc = win.document;
+                    } catch (error) {
+                        return null;
+                    }
+                    if (!doc) {
+                        return null;
+                    }
+                    var element = null;
+                    try {
+                        element = selector ? doc.querySelector(selector) : null;
+                    } catch (error) {
+                        element = null;
+                    }
+                    if (element) {
+                        return { element: element, win: win };
+                    }
+                    var frames = [];
+                    try {
+                        frames = doc.querySelectorAll('iframe');
+                    } catch (error) {
+                        frames = [];
+                    }
+                    for (var index = 0; index < frames.length; index += 1) {
+                        var child = null;
+                        try {
+                            child = frames[index].contentWindow;
+                        } catch (error) {
+                            child = null;
+                        }
+                        if (!child) {
+                            continue;
+                        }
+                        var found = findAnchor(child);
+                        if (found) {
+                            return found;
+                        }
+                    }
+                    return null;
+                }
+                function rectInRoot(found) {
+                    var rect = found.element.getBoundingClientRect();
+                    var top = rect.top;
+                    var left = rect.left;
+                    var win = found.win;
+                    while (win && win !== window) {
+                        var frame = win.frameElement;
+                        if (!frame) {
+                            break;
+                        }
+                        var frameRect = frame.getBoundingClientRect();
+                        top += frameRect.top;
+                        left += frameRect.left;
+                        win = win.parent;
+                    }
+                    return { top: top, left: left };
+                }
+                var found = findAnchor(window);
+                if (!found) {
+                    return JSON.stringify({
+                        applied: false,
+                        reason: "missingAnchor",
+                        targetTop: targetTop
+                    });
+                }
+                var scroller = document.scrollingElement || document.documentElement || document.body;
+                var beforeRect = rectInRoot(found);
+                var beforeScrollY = Math.round(window.scrollY || scroller.scrollTop || 0);
+                var deltaY = beforeRect.top - targetTop;
+                if (window.scrollBy) {
+                    window.scrollBy(0, deltaY);
+                } else if (scroller) {
+                    scroller.scrollTop = Math.max(0, scroller.scrollTop + deltaY);
+                }
+                var afterRect = rectInRoot(found);
+                return JSON.stringify({
+                    applied: true,
+                    reason: null,
+                    beforeTop: beforeRect.top,
+                    afterTop: afterRect.top,
+                    targetTop: targetTop,
+                    beforeScrollY: beforeScrollY,
+                    afterScrollY: Math.round(window.scrollY || scroller.scrollTop || 0)
+                });
+            })();
+        """.trimIndent()
+    }
+
+    private fun parseViewportAnchorRestoreResult(
+        result: String?,
+        fallbackTargetTop: Double,
+    ): EpubViewportAnchorRestoreResult? {
+        val payload = decodeJavascriptStringResult(result) ?: return null
+        return runCatching {
+            val json = JSONObject(payload)
+            EpubViewportAnchorRestoreResult(
+                applied = json.optBoolean("applied", false),
+                reason = json.optString("reason").takeIf { it.isNotBlank() && it != "null" },
+                beforeTop = json.optDoubleOrNull("beforeTop"),
+                afterTop = json.optDoubleOrNull("afterTop"),
+                targetTop = json.optDoubleOrNull("targetTop") ?: fallbackTargetTop,
+                beforeScrollY = json.optIntOrNull("beforeScrollY"),
+                afterScrollY = json.optIntOrNull("afterScrollY"),
+            )
+        }.getOrNull()
+    }
+
+    private fun decodeJavascriptStringResult(result: String?): String? {
+        if (result == null || result == "null") {
+            return null
+        }
+        return runCatching {
+            JSONArray("[$result]").optString(0)
+                .takeIf { it.isNotBlank() && it != "null" }
+        }.getOrNull()
+    }
+
+    private fun JSONObject.optIntOrNull(key: String): Int? =
+        if (has(key) && !isNull(key)) optInt(key) else null
+
+    private fun JSONObject.optDoubleOrNull(key: String): Double? =
+        if (has(key) && !isNull(key)) optDouble(key) else null
+
+    private fun Double.toJsNumber(): String =
+        if (isFinite()) toString() else "0"
 
     private val r2PagerAdapter: R2PagerAdapter?
         get() = if (::resourcePager.isInitialized) {
