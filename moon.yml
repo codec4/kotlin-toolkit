@@ -1,0 +1,48 @@
+$schema: 'https://moonrepo.dev/schemas/project.json'
+
+language: 'kotlin'
+layer: 'library'
+
+fileGroups:
+  gradle:
+    - 'build.gradle.kts'
+    - 'settings.gradle.kts'
+    - 'gradle.properties'
+    - 'gradle/**/*'
+    - 'gradlew'
+    - 'gradlew.bat'
+    - 'buildSrc/**/*'
+  focusedSources:
+    - 'readium/shared/**/*'
+    - 'readium/streamer/**/*'
+    - 'readium/navigator/**/*'
+    - 'readium/adapters/pdfium/**/*'
+
+tasks:
+  navigator-compile:
+    script: |
+      ./gradlew \
+        :readium:readium-shared:compileDebugKotlin \
+        :readium:readium-streamer:compileDebugKotlin \
+        :readium:readium-navigator:compileDebugKotlin \
+        :readium:adapters:pdfium:readium-adapter-pdfium-document:compileDebugKotlin \
+        :readium:adapters:pdfium:readium-adapter-pdfium-navigator:compileDebugKotlin
+    inputs:
+      - '@globs(gradle)'
+      - '@globs(focusedSources)'
+    options:
+      cache: false
+
+  focused-check:
+    script: |
+      ./gradlew \
+        :readium:readium-shared:check \
+        :readium:readium-streamer:check \
+        :readium:readium-navigator:check \
+        :readium:adapters:pdfium:readium-adapter-pdfium-document:check \
+        :readium:adapters:pdfium:readium-adapter-pdfium-navigator:check
+    inputs:
+      - '@globs(gradle)'
+      - '@globs(focusedSources)'
+    options:
+      cache: false

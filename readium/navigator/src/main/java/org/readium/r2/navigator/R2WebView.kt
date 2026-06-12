@@ -745,17 +745,25 @@ internal class R2WebView(context: Context, attrs: AttributeSet) : R2BasicWebView
                     val y = ev.safeGetY(activePointerIndex)
 
                     if (scrollMode) {
-                        val totalDelta = (y - mInitialMotionY).toInt()
-                        if (abs(totalDelta) < 200) {
+                        val totalDeltaX = (x - mInitialMotionX).toInt()
+                        val totalDeltaY = (y - mInitialMotionY).toInt()
+                        if (
+                            scrollModeResourceTurnGesturePolicy.shouldTurnResource(
+                                deltaX = totalDeltaX,
+                                deltaY = totalDeltaY,
+                                flingDistance = mFlingDistance,
+                                touchSlop = mTouchSlop,
+                            )
+                        ) {
                             if (mInitialOverscroll == OverscrollMode.BOTH) {
-                                if (mInitialMotionX < x) {
+                                if (totalDeltaX > 0) {
                                     scrollLeft(animated = true)
-                                } else if (mInitialMotionX > x) {
+                                } else if (totalDeltaX < 0) {
                                     scrollRight(animated = true)
                                 }
-                            } else if (mInitialMotionX < x && mInitialOverscroll == OverscrollMode.LEFT) {
+                            } else if (totalDeltaX > 0 && mInitialOverscroll == OverscrollMode.LEFT) {
                                 scrollLeft(animated = true)
-                            } else if (mInitialMotionX > x && mInitialOverscroll == OverscrollMode.RIGHT) {
+                            } else if (totalDeltaX < 0 && mInitialOverscroll == OverscrollMode.RIGHT) {
                                 scrollRight(animated = true)
                             }
                         }

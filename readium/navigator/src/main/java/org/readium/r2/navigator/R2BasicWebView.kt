@@ -118,6 +118,8 @@ internal open class R2BasicWebView(context: Context, attrs: AttributeSet) : WebV
 
     val scrollMode: Boolean get() = scrollModeFlow.value
     var disablePageTurnsWhileScrolling: Boolean = false
+    var scrollModeResourceTurnGesturePolicy: ScrollModeResourceTurnGesturePolicy =
+        ScrollModeResourceTurnGesturePolicy.Legacy
 
     var callback: OnOverScrolledCallback? = null
 

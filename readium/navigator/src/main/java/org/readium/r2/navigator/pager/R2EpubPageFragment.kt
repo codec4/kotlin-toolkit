@@ -39,6 +39,7 @@ import kotlinx.coroutines.launch
 import org.readium.r2.navigator.R
 import org.readium.r2.navigator.R2BasicWebView
 import org.readium.r2.navigator.R2WebView
+import org.readium.r2.navigator.ScrollModeResourceTurnGesturePolicy
 import org.readium.r2.navigator.databinding.ReadiumNavigatorViewpagerFragmentEpubBinding
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
 import org.readium.r2.navigator.epub.EpubNavigatorViewModel
@@ -161,6 +162,9 @@ internal class R2EpubPageFragment : Fragment() {
 
         webView.disablePageTurnsWhileScrolling =
             navigator?.config?.disablePageTurnsWhileScrolling ?: false
+        webView.scrollModeResourceTurnGesturePolicy =
+            navigator?.config?.scrollModeResourceTurnGesturePolicy
+                ?: ScrollModeResourceTurnGesturePolicy.Legacy
         webView.settings.javaScriptEnabled = true
         webView.isVerticalScrollBarEnabled = false
         webView.isHorizontalScrollBarEnabled = false
