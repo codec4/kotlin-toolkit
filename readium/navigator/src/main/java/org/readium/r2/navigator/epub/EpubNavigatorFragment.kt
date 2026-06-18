@@ -332,6 +332,10 @@ public class EpubNavigatorFragment internal constructor(
      */
     public suspend fun currentLocatorWithPrecisePosition(): Locator? {
         var locator = currentLocatorWithNativeScroll() ?: return null
+        val snapshot = EpubNativeScrollSnapshot.fromLocator(locator)
+        if (snapshot?.isAtResourceStart() == true) {
+            return locator.withoutEpubPrecisePositionAtResourceStart()
+        }
         val webView = currentReflowablePageFragment?.webView ?: return locator
         val anchorLocator = firstVisibleElementLocator() ?: return locator
         val cssSelector = anchorLocator.cssSelector ?: return locator
@@ -353,6 +357,14 @@ public class EpubNavigatorFragment internal constructor(
 
         if (anchor == null && snapshot == null) {
             return EpubPrecisePositionRestoreResult(reason = "missingPrecisePosition", attempts = 0)
+        }
+
+        if (snapshot?.isAtResourceStart(options.scrollTolerancePx) == true) {
+            return restoreNativeScroll(
+                locator.withoutEpubPrecisePositionAtResourceStart(),
+                snapshot,
+                options,
+            )
         }
 
         if (anchor != null) {
