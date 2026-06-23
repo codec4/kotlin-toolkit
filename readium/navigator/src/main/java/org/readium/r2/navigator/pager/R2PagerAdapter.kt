@@ -125,11 +125,12 @@ internal class R2PagerAdapter internal constructor(
      * Loads the given [Locator] in the page fragment at the given position. If not loaded, it
      * will be used when the fragment will be created.
      */
-    internal fun loadLocatorAt(position: Int, locator: Locator) {
+    internal fun loadLocatorAt(position: Int, locator: Locator): Long? {
         val id = getItemId(position)
         val fragment = mFragments.get(id)
-        if (fragment == null) {
+        return if (fragment == null) {
             pendingLocators.put(id, locator)
+            null
         } else {
             (fragment as? R2EpubPageFragment)?.loadLocator(locator)
         }

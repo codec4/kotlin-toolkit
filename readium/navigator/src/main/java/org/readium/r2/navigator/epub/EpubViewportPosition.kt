@@ -205,17 +205,25 @@ public fun EpubNativeScrollSnapshot.isAtResourceStart(tolerancePx: Int = 1): Boo
     scrollX <= tolerancePx && scrollY <= tolerancePx
 
 public fun Locator.withoutEpubPrecisePositionAtResourceStart(): Locator {
+    val locator = withoutEpubPrecisePosition()
+    return locator.copy(
+        locations = locator.locations.copy(
+            fragments = emptyList(),
+            progression = 0.0,
+        ),
+        text = Locator.Text(),
+    )
+}
+
+public fun Locator.withoutEpubPrecisePosition(): Locator {
     val otherLocations = locations.otherLocations.toMutableMap()
     otherLocations.remove(NATIVE_SCROLL_LOCATION_KEY)
     otherLocations.remove(VIEWPORT_ANCHOR_LOCATION_KEY)
     otherLocations.remove(CSS_SELECTOR_LOCATION_KEY)
     return copy(
         locations = locations.copy(
-            fragments = emptyList(),
-            progression = 0.0,
             otherLocations = otherLocations,
         ),
-        text = Locator.Text(),
     )
 }
 
