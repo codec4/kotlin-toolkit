@@ -78,6 +78,9 @@ internal class R2EpubPageFragment : Fragment() {
 
     private var isLoading: Boolean = false
     private val _isLoaded = MutableStateFlow(false)
+    private val _locatorLoadSerial = MutableStateFlow(0L)
+    private val _locatorLoadInProgress = MutableStateFlow(false)
+    private var pendingLocatorLoadSerial: Long? = null
 
     internal fun setFontSize(fontSize: Double) {
         textZoom = (fontSize * 100).roundToInt()
@@ -95,6 +98,14 @@ internal class R2EpubPageFragment : Fragment() {
     @InternalReadiumApi
     val isLoaded: StateFlow<Boolean>
         get() = _isLoaded.asStateFlow()
+
+    @InternalReadiumApi
+    val locatorLoadSerial: StateFlow<Long>
+        get() = _locatorLoadSerial.asStateFlow()
+
+    @InternalReadiumApi
+    val locatorLoadInProgress: StateFlow<Boolean>
+        get() = _locatorLoadInProgress.asStateFlow()
 
     /**
      * Waits for the page to be loaded.
@@ -132,6 +143,9 @@ internal class R2EpubPageFragment : Fragment() {
             "initialLocator",
             Locator::class.java
         )
+        if (pendingLocator != null) {
+            pendingLocatorLoadSerial = beginLocatorLoad()
+        }
     }
 
     @SuppressLint("SetJavaScriptEnabled", "JavascriptInterface")
@@ -403,17 +417,24 @@ internal class R2EpubPageFragment : Fragment() {
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.CREATED) {
                 val webView = requireNotNull(webView)
-                webView.visibility = View.VISIBLE
 
-                pendingLocator
-                    ?.let { locator ->
+                val locator = pendingLocator
+                if (locator != null) {
+                    val serial = pendingLocatorLoadSerial ?: beginLocatorLoad()
+                    try {
                         loadLocator(
                             webView,
                             requireNotNull(navigator).overflow.value.readingProgression,
                             locator
                         )
+                    } finally {
+                        completeLocatorLoad(serial)
                     }
-                    .also { pendingLocator = null }
+                }
+                pendingLocator = null
+                pendingLocatorLoadSerial = null
+
+                webView.visibility = View.VISIBLE
 
                 link?.let {
                     webView.listener?.onPageLoaded(webView, it)
@@ -422,19 +443,39 @@ internal class R2EpubPageFragment : Fragment() {
         }
     }
 
-    internal fun loadLocator(locator: Locator) {
+    internal fun loadLocator(locator: Locator): Long {
+        val serial = beginLocatorLoad()
         if (!isLoaded.value) {
             pendingLocator = locator
-            return
+            pendingLocatorLoadSerial = serial
+            return serial
         }
 
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.CREATED) {
-                val webView = requireNotNull(webView)
-                val epubNavigator = requireNotNull(navigator)
-                loadLocator(webView, epubNavigator.overflow.value.readingProgression, locator)
-                webView.listener?.onProgressionChanged()
+                try {
+                    val webView = requireNotNull(webView)
+                    val epubNavigator = requireNotNull(navigator)
+                    loadLocator(webView, epubNavigator.overflow.value.readingProgression, locator)
+                    webView.listener?.onProgressionChanged()
+                } finally {
+                    completeLocatorLoad(serial)
+                }
             }
+        }
+        return serial
+    }
+
+    private fun beginLocatorLoad(): Long {
+        val serial = _locatorLoadSerial.value + 1
+        _locatorLoadSerial.value = serial
+        _locatorLoadInProgress.value = true
+        return serial
+    }
+
+    private fun completeLocatorLoad(serial: Long) {
+        if (_locatorLoadSerial.value == serial) {
+            _locatorLoadInProgress.value = false
         }
     }
 
@@ -475,6 +516,7 @@ internal class R2EpubPageFragment : Fragment() {
                 item -= 1
             }
             webView.setCurrentItem(item, false)
+            webView.awaitVisualState()
         }
     }
 

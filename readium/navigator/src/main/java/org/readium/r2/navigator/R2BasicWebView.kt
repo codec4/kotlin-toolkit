@@ -20,6 +20,8 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import androidx.annotation.RequiresApi
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 import kotlinx.coroutines.CoroutineScope
@@ -511,16 +513,26 @@ internal open class R2BasicWebView(context: Context, attrs: AttributeSet) : WebV
         runJavaScript("readium.scrollToEnd();")
     }
 
-    suspend fun scrollToId(htmlId: String): Boolean =
-        runJavaScriptSuspend("readium.scrollToId(\"$htmlId\");").toBoolean()
+    suspend fun scrollToId(htmlId: String): Boolean {
+        val scrolled = runJavaScriptSuspend("readium.scrollToId(\"$htmlId\");").toBoolean()
+        if (scrolled) {
+            awaitVisualState()
+        }
+        return scrolled
+    }
 
-    fun scrollToPosition(progression: Double) {
-        runJavaScript("readium.scrollToPosition(\"$progression\");")
+    suspend fun scrollToPosition(progression: Double) {
+        runJavaScriptSuspend("readium.scrollToPosition(\"$progression\");")
+        awaitVisualState()
     }
 
     suspend fun scrollToLocator(locator: Locator): Boolean {
         val json = locator.toJSON().toString()
-        return runJavaScriptSuspend("readium.scrollToLocator($json);").toBoolean()
+        val scrolled = runJavaScriptSuspend("readium.scrollToLocator($json);").toBoolean()
+        if (scrolled) {
+            awaitVisualState()
+        }
+        return scrolled
     }
 
     fun setScrollMode(scrollMode: Boolean) {
@@ -587,6 +599,30 @@ internal open class R2BasicWebView(context: Context, attrs: AttributeSet) : WebV
     internal suspend fun runJavaScriptSuspend(javascript: String): String = suspendCoroutine { cont ->
         runJavaScript(javascript) { result ->
             cont.resume(result)
+        }
+    }
+
+    internal suspend fun awaitVisualState() {
+        if (!isShown || windowToken == null) {
+            runJavaScriptSuspend("true")
+            suspendCoroutine<Unit> { cont ->
+                postDelayed({ cont.resume(Unit) }, 50L)
+            }
+            return
+        }
+
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.VISUAL_STATE_CALLBACK)) {
+            suspendCoroutine<Unit> { cont ->
+                WebViewCompat.postVisualStateCallback(this, System.nanoTime()) {
+                    cont.resume(Unit)
+                }
+            }
+            return
+        }
+
+        runJavaScriptSuspend("true")
+        suspendCoroutine<Unit> { cont ->
+            postDelayed({ cont.resume(Unit) }, 50L)
         }
     }
 

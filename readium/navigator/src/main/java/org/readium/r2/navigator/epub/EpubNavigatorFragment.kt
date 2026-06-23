@@ -32,6 +32,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.withStarted
 import androidx.viewpager.widget.ViewPager
+import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.reflect.KClass
 import kotlinx.coroutines.Job
@@ -296,7 +297,13 @@ public class EpubNavigatorFragment internal constructor(
         data object Ready : State()
     }
 
+    private data class LocatorLoadTarget(
+        val href: Url,
+        val serial: Long,
+    )
+
     private var state: State = State.Initializing
+    private var latestLocatorLoadTarget: LocatorLoadTarget? = null
 
     // Configurable
 
@@ -380,6 +387,69 @@ public class EpubNavigatorFragment internal constructor(
         return snapshot
             ?.let { restoreNativeScroll(locator, it, options) }
             ?: EpubPrecisePositionRestoreResult(reason = "missingNativeScrollFallback", attempts = 0)
+    }
+
+    /**
+     * Waits until a locator navigation has been applied to the visible reflowable WebView and the
+     * native scroll position is stable enough to display.
+     */
+    public suspend fun awaitLocatorNavigationSettled(
+        locator: Locator,
+        options: EpubPrecisePositionRestoreOptions = EpubPrecisePositionRestoreOptions(),
+    ): Boolean {
+        if (publication.metadata.layout == Layout.FIXED) {
+            delay(options.retryDelayMs)
+            return true
+        }
+
+        val target = publication.normalizeLocator(locator)
+        val expectedLocatorLoad = latestLocatorLoadTarget
+            ?.takeIf { it.href.isEquivalent(target.href.removeFragment()) }
+        var previousScrollX: Int? = null
+        var previousScrollY: Int? = null
+        var previousContentHeight: Int? = null
+        var stableAttempts = 0
+
+        for (attempt in 0..options.settleMaxAttempts) {
+            val page = currentReflowablePageFragment
+            val webView = page?.webView
+            val pageMatches = page?.link?.url()?.isEquivalent(target.href.removeFragment()) == true
+            val locatorLoadMatches = expectedLocatorLoad == null ||
+                page?.locatorLoadSerial?.value == expectedLocatorLoad.serial
+            val locatorLoadFinished = page?.locatorLoadInProgress?.value == false && locatorLoadMatches
+            val pageLoaded = page?.isLoaded?.value == true
+
+            if (pageMatches && pageLoaded && locatorLoadFinished && webView != null) {
+                val contentHeight = readerWebViewContentHeight(webView)
+                val contentHeightStable = contentHeight
+                    ?.let { contentHeightIsStable(previousContentHeight, it, options) }
+                    ?: (previousContentHeight == null)
+                val scrollStable = previousScrollX == webView.scrollX &&
+                    previousScrollY == webView.scrollY &&
+                    contentHeightStable
+
+                stableAttempts = if (scrollStable) stableAttempts + 1 else 0
+                if (stableAttempts >= options.stableScrollAttempts) {
+                    webView.awaitVisualState()
+                    return true
+                }
+
+                previousScrollX = webView.scrollX
+                previousScrollY = webView.scrollY
+                previousContentHeight = contentHeight
+            } else {
+                stableAttempts = 0
+                previousScrollX = null
+                previousScrollY = null
+                previousContentHeight = null
+            }
+
+            if (attempt < options.settleMaxAttempts) {
+                delay(options.settleRetryDelayMs)
+            }
+        }
+
+        return false
     }
 
     private val viewModel: EpubNavigatorViewModel by viewModels {
@@ -705,10 +775,13 @@ public class EpubNavigatorFragment internal constructor(
             } ?: return
             val (index, _) = page
 
+            val loadSerial = r2PagerAdapter?.loadLocatorAt(index, locator)
+            latestLocatorLoadTarget = loadSerial?.let { serial ->
+                LocatorLoadTarget(href = href, serial = serial)
+            }
             if (resourcePager.currentItem != index) {
                 resourcePager.currentItem = index
             }
-            r2PagerAdapter?.loadLocatorAt(index, locator)
         }
 
         if (publication.metadata.layout != Layout.FIXED) {
@@ -1050,19 +1123,37 @@ public class EpubNavigatorFragment internal constructor(
         val attempts: Int,
     )
 
+    private fun Locator.withoutPreciseRestoreJumpTarget(): Locator =
+        copy(
+            locations = locations.copy(fragments = emptyList()),
+        )
+
+    private fun currentReflowablePageMatches(locator: Locator): Boolean {
+        val currentUrl = currentReflowablePageFragment
+            ?.link
+            ?.url()
+            ?: return false
+        return currentUrl.isEquivalent(locator.href.removeFragment())
+    }
+
     private suspend fun restoreViewportAnchor(
         locator: Locator,
         anchor: EpubViewportAnchor,
         options: EpubPrecisePositionRestoreOptions,
     ): EpubPrecisePositionRestoreResult {
-        go(locator, animated = false)
-        val awaited = awaitCurrentReflowableWebView(options)
+        if (!currentReflowablePageMatches(locator)) {
+            go(locator.withoutPreciseRestoreJumpTarget(), animated = false)
+        }
+        val awaited = awaitCurrentReflowableWebView(locator, options)
             ?: return EpubPrecisePositionRestoreResult(
                 reason = "missingVisibleWebView",
                 attempts = options.maxWaitAttempts,
             )
 
         val result = applyViewportAnchor(awaited.webView, anchor)
+        if (result?.targetReached(options.scrollTolerancePx) == true) {
+            awaited.webView.awaitVisualState()
+        }
         return EpubPrecisePositionRestoreResult(
             reason = when {
                 result?.targetReached(options.scrollTolerancePx) == true -> "viewportAnchorRestored"
@@ -1079,8 +1170,10 @@ public class EpubNavigatorFragment internal constructor(
         snapshot: EpubNativeScrollSnapshot,
         options: EpubPrecisePositionRestoreOptions,
     ): EpubPrecisePositionRestoreResult {
-        go(locator, animated = false)
-        val awaited = awaitCurrentReflowableWebView(options)
+        if (!currentReflowablePageMatches(locator)) {
+            go(locator.withoutPreciseRestoreJumpTarget(), animated = false)
+        }
+        val awaited = awaitCurrentReflowableWebView(locator, options)
             ?: return EpubPrecisePositionRestoreResult(
                 reason = "missingVisibleWebView",
                 attempts = options.maxWaitAttempts,
@@ -1126,6 +1219,7 @@ public class EpubNavigatorFragment internal constructor(
                 stableScrollAttempts >= options.stableScrollAttempts
 
             if (settled) {
+                awaited.webView.awaitVisualState()
                 return EpubPrecisePositionRestoreResult(
                     reason = "settled",
                     attempts = attempt + 1,
@@ -1152,12 +1246,18 @@ public class EpubNavigatorFragment internal constructor(
     }
 
     private suspend fun awaitCurrentReflowableWebView(
+        locator: Locator,
         options: EpubPrecisePositionRestoreOptions,
     ): AwaitedReflowableWebView? {
         for (attempt in 0..options.maxWaitAttempts) {
             val page = currentReflowablePageFragment
             val webView = page?.webView
-            if (page?.isLoaded?.value == true && webView != null) {
+            if (
+                currentReflowablePageMatches(locator) &&
+                page?.isLoaded?.value == true &&
+                page.locatorLoadInProgress.value == false &&
+                webView != null
+            ) {
                 return AwaitedReflowableWebView(webView, attempt + 1)
             }
             if (attempt < options.maxWaitAttempts) {
@@ -1234,7 +1334,7 @@ public class EpubNavigatorFragment internal constructor(
         current: Int,
         options: EpubPrecisePositionRestoreOptions,
     ): Boolean =
-        previous != null && kotlin.math.abs(previous - current) <= options.heightTolerancePx
+        previous != null && abs(previous - current) <= options.heightTolerancePx
 
     private suspend fun captureViewportAnchor(
         webView: R2WebView,
