@@ -227,6 +227,28 @@ public fun Locator.withoutEpubPrecisePosition(): Locator {
     )
 }
 
+internal fun epubNativeScrollSnapshotProgression(
+    scrollMode: Boolean,
+    scrollY: Int,
+    contentHeight: Int?,
+    webViewProgression: Double,
+    axis: String,
+): Double? {
+    val fallback = webViewProgression
+        .takeIf { it.isFinite() }
+        ?.coerceIn(0.0, 1.0)
+    if (!scrollMode) {
+        return fallback
+    }
+    if (!axis.equals("vertical", ignoreCase = true)) {
+        return fallback
+    }
+    return contentHeight
+        ?.takeIf { it > 0 }
+        ?.let { (scrollY.toDouble() / it).coerceIn(0.0, 1.0) }
+        ?: fallback
+}
+
 public fun Locator.withNativeScrollSnapshot(snapshot: EpubNativeScrollSnapshot): Locator {
     val otherLocations = locations.otherLocations.toMutableMap()
     otherLocations[NATIVE_SCROLL_LOCATION_KEY] = snapshot.toLocationValue()
