@@ -65,7 +65,27 @@ class R2WebViewPagingTest {
         assertEquals(
             PagedDragSettleAction.Ignore,
             PagedWebViewGesturePolicy.settleAction(
-                gesture(deltaX = -120, end = PagedDragEnd.TapRelease)
+                gesture(deltaX = 0, deltaY = 0, end = PagedDragEnd.TapRelease)
+            ),
+        )
+    }
+
+    @Test
+    fun samePageMovedTapReleaseSnapsInsteadOfFallingThroughToLinkClick() {
+        assertEquals(
+            PagedDragSettleAction.SnapToCurrentPage,
+            PagedWebViewGesturePolicy.settleAction(
+                gesture(deltaX = -24, touchSlop = 10, end = PagedDragEnd.TapRelease)
+            ),
+        )
+    }
+
+    @Test
+    fun verticalMovedTapReleaseSnapsInsteadOfFallingThroughToLinkClick() {
+        assertEquals(
+            PagedDragSettleAction.SnapToCurrentPage,
+            PagedWebViewGesturePolicy.settleAction(
+                gesture(deltaY = 24, touchSlop = 10, end = PagedDragEnd.TapRelease)
             ),
         )
     }
@@ -126,9 +146,11 @@ class R2WebViewPagingTest {
         initialVelocity: Int = 0,
         currentVelocity: Int = 0,
         deltaX: Int = 0,
+        deltaY: Int = 0,
         pageWidth: Int = 1000,
         flingDistance: Int = 25,
         minimumVelocity: Int = 400,
+        touchSlop: Int = 10,
         end: PagedDragEnd = PagedDragEnd.DragRelease,
     ): PagedDragGesture =
         PagedDragGesture(
@@ -137,9 +159,11 @@ class R2WebViewPagingTest {
             initialVelocity = initialVelocity,
             currentVelocity = currentVelocity,
             deltaX = deltaX,
+            deltaY = deltaY,
             pageWidth = pageWidth,
             flingDistance = flingDistance,
             minimumVelocity = minimumVelocity,
+            touchSlop = touchSlop,
             end = end,
         )
 }
