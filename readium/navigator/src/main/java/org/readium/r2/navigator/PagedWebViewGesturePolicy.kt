@@ -23,9 +23,11 @@ internal data class PagedDragGesture(
     val initialVelocity: Int,
     val currentVelocity: Int,
     val deltaX: Int,
+    val deltaY: Int,
     val pageWidth: Int,
     val flingDistance: Int,
     val minimumVelocity: Int,
+    val touchSlop: Int,
     val end: PagedDragEnd,
 )
 
@@ -54,8 +56,12 @@ internal object PagedWebViewGesturePolicy {
             minimumVelocity = gesture.minimumVelocity,
         )
 
+        val movedBeyondTapSlop = abs(gesture.deltaX) > gesture.touchSlop.coerceAtLeast(1) ||
+            abs(gesture.deltaY) > gesture.touchSlop.coerceAtLeast(1)
         return when {
-            targetPage == gesture.currentPage && gesture.end == PagedDragEnd.TapRelease ->
+            targetPage == gesture.currentPage &&
+                gesture.end == PagedDragEnd.TapRelease &&
+                !movedBeyondTapSlop ->
                 PagedDragSettleAction.Ignore
             targetPage == gesture.currentPage -> PagedDragSettleAction.SnapToCurrentPage
             targetPage < 0 -> PagedDragSettleAction.PreviousResource

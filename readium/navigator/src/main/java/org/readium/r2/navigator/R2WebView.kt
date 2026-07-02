@@ -784,7 +784,7 @@ internal class R2WebView(context: Context, attrs: AttributeSet) : R2BasicWebView
                             }
                         }
                     } else {
-                        handledByPager = settlePagedDrag(x, PagedDragEnd.DragRelease)
+                        handledByPager = settlePagedDrag(x, y, PagedDragEnd.DragRelease)
                     }
                 }
                 // The gesture was made while a smooth scrolling was animating. If no dragging
@@ -796,7 +796,8 @@ internal class R2WebView(context: Context, attrs: AttributeSet) : R2BasicWebView
                 }
                 !scrollMode && !isSelecting -> {
                     val x = ev.activePointerXOrDefault(mActivePointerId)
-                    handledByPager = settlePagedDrag(x, PagedDragEnd.TapRelease)
+                    val y = ev.activePointerYOrDefault(mActivePointerId)
+                    handledByPager = settlePagedDrag(x, y, PagedDragEnd.TapRelease)
                 }
             }
 
@@ -806,7 +807,8 @@ internal class R2WebView(context: Context, attrs: AttributeSet) : R2BasicWebView
 
                 if (!scrollMode && !isSelecting) {
                     val x = ev.activePointerXOrDefault(mActivePointerId)
-                    handledByPager = settlePagedDrag(x, PagedDragEnd.Cancel)
+                    val y = ev.activePointerYOrDefault(mActivePointerId)
+                    handledByPager = settlePagedDrag(x, y, PagedDragEnd.Cancel)
                     mIgnoreNextUpAfterCancel = handledByPager
                 } else {
                     scrollToItem(mCurItem, true, 0, false)
@@ -830,9 +832,10 @@ internal class R2WebView(context: Context, attrs: AttributeSet) : R2BasicWebView
         return super.onTouchEvent(ev)
     }
 
-    private fun settlePagedDrag(x: Float, end: PagedDragEnd): Boolean {
+    private fun settlePagedDrag(x: Float, y: Float, end: PagedDragEnd): Boolean {
         val velocity = getCurrentXVelocity() ?: 0
         val totalDelta = (x - mInitialMotionX).toInt()
+        val totalDeltaY = (y - mInitialMotionY).toInt()
         val action = PagedWebViewGesturePolicy.settleAction(
             PagedDragGesture(
                 currentPage = mCurItem,
@@ -840,9 +843,11 @@ internal class R2WebView(context: Context, attrs: AttributeSet) : R2BasicWebView
                 initialVelocity = mInitialVelocity ?: 0,
                 currentVelocity = velocity,
                 deltaX = totalDelta,
+                deltaY = totalDeltaY,
                 pageWidth = touchViewportWidth(),
                 flingDistance = mFlingDistance,
                 minimumVelocity = mMinimumVelocity,
+                touchSlop = mTouchSlop,
                 end = end,
             )
         )
