@@ -125,6 +125,53 @@ class R2WebViewPagingTest {
     }
 
     @Test
+    fun verticalDominantFlingDoesNotTurnResource() {
+        assertEquals(
+            PagedDragSettleAction.SnapToCurrentPage,
+            PagedWebViewGesturePolicy.settleAction(
+                gesture(
+                    currentPage = 7,
+                    pageCount = 8,
+                    initialVelocity = 0,
+                    currentVelocity = -900,
+                    deltaX = -80,
+                    deltaY = -600,
+                )
+            ),
+        )
+    }
+
+    @Test
+    fun verticalDominantLongDragDoesNotTurnPage() {
+        assertEquals(
+            PagedDragSettleAction.SnapToCurrentPage,
+            PagedWebViewGesturePolicy.settleAction(
+                gesture(
+                    deltaX = -360,
+                    deltaY = -600,
+                )
+            ),
+        )
+    }
+
+    @Test
+    fun horizontalDominantFlingStillTurnsResource() {
+        assertEquals(
+            PagedDragSettleAction.NextResource,
+            PagedWebViewGesturePolicy.settleAction(
+                gesture(
+                    currentPage = 7,
+                    pageCount = 8,
+                    initialVelocity = 0,
+                    currentVelocity = -900,
+                    deltaX = -600,
+                    deltaY = -80,
+                )
+            ),
+        )
+    }
+
+    @Test
     fun reversedFlingFallsBackToDragDistance() {
         assertEquals(
             3,
