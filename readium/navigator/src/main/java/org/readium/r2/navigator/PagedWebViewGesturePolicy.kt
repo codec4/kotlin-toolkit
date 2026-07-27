@@ -46,18 +46,24 @@ internal object PagedWebViewGesturePolicy {
             return PagedDragSettleAction.SnapToCurrentPage
         }
 
-        val targetPage = targetPageForPagedDrag(
-            currentPage = gesture.currentPage,
-            initialVelocity = gesture.initialVelocity,
-            currentVelocity = gesture.currentVelocity,
-            deltaX = gesture.deltaX,
-            pageWidth = gesture.pageWidth,
-            flingDistance = gesture.flingDistance,
-            minimumVelocity = gesture.minimumVelocity,
-        )
-
-        val movedBeyondTapSlop = abs(gesture.deltaX) > gesture.touchSlop.coerceAtLeast(1) ||
-            abs(gesture.deltaY) > gesture.touchSlop.coerceAtLeast(1)
+        val touchSlop = gesture.touchSlop.coerceAtLeast(1)
+        val absoluteX = abs(gesture.deltaX)
+        val absoluteY = abs(gesture.deltaY)
+        val movedBeyondTapSlop = absoluteX > touchSlop || absoluteY > touchSlop
+        val hasHorizontalIntent = absoluteX > touchSlop && absoluteX > absoluteY
+        val targetPage = if (hasHorizontalIntent) {
+            targetPageForPagedDrag(
+                currentPage = gesture.currentPage,
+                initialVelocity = gesture.initialVelocity,
+                currentVelocity = gesture.currentVelocity,
+                deltaX = gesture.deltaX,
+                pageWidth = gesture.pageWidth,
+                flingDistance = gesture.flingDistance,
+                minimumVelocity = gesture.minimumVelocity,
+            )
+        } else {
+            gesture.currentPage
+        }
         return when {
             targetPage == gesture.currentPage &&
                 gesture.end == PagedDragEnd.TapRelease &&
