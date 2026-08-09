@@ -10,6 +10,8 @@
 package org.readium.r2.navigator.extensions
 
 import kotlinx.coroutines.runBlocking
+import java.util.Collections
+import java.util.WeakHashMap
 import org.readium.r2.shared.DelicateReadiumApi
 import org.readium.r2.shared.publication.Locator
 import org.readium.r2.shared.publication.Publication
@@ -18,8 +20,17 @@ import org.readium.r2.shared.util.Url
 
 // These extensions will be removed in the next release, with `PositionsService`.
 
+private val positionsByResourceCache = Collections.synchronizedMap(
+    WeakHashMap<Publication, Map<Url, List<Locator>>>(),
+)
+
 internal val Publication.positionsByResource: Map<Url, List<Locator>>
-    get() = runBlocking { positions().groupBy { it.href } }
+    get() = positionsByResourceCache[this]
+        ?: synchronized(positionsByResourceCache) {
+            positionsByResourceCache[this]
+                ?: runBlocking { positions().groupBy { it.href } }
+                    .also { positionsByResourceCache[this] = it }
+        }
 
 /**
  * Historically, we used to have "absolute" HREFs in the manifest:
