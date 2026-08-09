@@ -473,8 +473,6 @@ public class EpubNavigatorFragment internal constructor(
             runBlocking { publication.positionsByReadingOrder() }
         }
 
-    internal lateinit var positions: List<Locator>
-
     internal lateinit var resourcePager: R2ViewPager
 
     private lateinit var resourcesSingle: List<PageResource>
@@ -495,8 +493,6 @@ public class EpubNavigatorFragment internal constructor(
         currentActivity = requireActivity()
         _binding = ReadiumNavigatorViewpagerBinding.inflate(inflater, container, false)
         var view: View = binding.root
-
-        positions = positionsByReadingOrder.flatten()
 
         when (viewModel.layout) {
             Layout.REFLOWABLE, Layout.SCROLLED -> {

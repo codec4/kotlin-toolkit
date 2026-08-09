@@ -16,6 +16,7 @@ import org.readium.r2.shared.util.logging.WarningLogger
 import org.readium.r2.shared.util.pdf.PdfDocumentFactory
 import org.readium.r2.streamer.parser.audio.AudioParser
 import org.readium.r2.streamer.parser.epub.EpubParser
+import org.readium.r2.streamer.parser.epub.EpubPositionsService
 import org.readium.r2.streamer.parser.image.ImageParser
 import org.readium.r2.streamer.parser.pdf.PdfParser
 import org.readium.r2.streamer.parser.readium.ReadiumWebPubParser
@@ -66,9 +67,11 @@ public class DefaultPublicationParser(
     assetRetriever: AssetRetriever,
     pdfFactory: PdfDocumentFactory<*>?,
     additionalParsers: List<PublicationParser> = emptyList(),
+    reflowablePositionsStrategy: EpubPositionsService.ReflowableStrategy =
+        EpubPositionsService.ReflowableStrategy.recommended,
 ) : PublicationParser by CompositePublicationParser(
     additionalParsers + listOfNotNull(
-        EpubParser(httpClient),
+        EpubParser(httpClient, reflowablePositionsStrategy),
         pdfFactory?.let { PdfParser(context, it) },
         ReadiumWebPubParser(context, httpClient, pdfFactory),
         ImageParser(assetRetriever),
