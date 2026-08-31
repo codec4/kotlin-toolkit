@@ -46,7 +46,8 @@ public class DefaultResourceContentExtractorFactory : ResourceContentExtractor.F
 
     override suspend fun createExtractor(resource: Resource, mediaType: MediaType): ResourceContentExtractor? =
         when (mediaType) {
-            MediaType.HTML, MediaType.XHTML -> HtmlResourceContentExtractor()
+            MediaType.HTML -> HtmlResourceContentExtractor()
+            MediaType.XHTML -> HtmlResourceContentExtractor.forXhtml()
             else -> null
         }
 }
@@ -55,7 +56,16 @@ public class DefaultResourceContentExtractorFactory : ResourceContentExtractor.F
  * [ResourceContentExtractor] implementation for HTML resources.
  */
 @ExperimentalReadiumApi
-public class HtmlResourceContentExtractor : ResourceContentExtractor {
+public class HtmlResourceContentExtractor private constructor(
+    private val parser: Parser,
+) : ResourceContentExtractor {
+
+    public constructor() : this(Parser.htmlParser())
+
+    internal companion object {
+        fun forXhtml(): HtmlResourceContentExtractor =
+            HtmlResourceContentExtractor(Parser.xmlParser())
+    }
 
     override suspend fun extractText(resource: Resource): Try<String, ReadError> =
         withContext(Dispatchers.IO) {
@@ -72,7 +82,7 @@ public class HtmlResourceContentExtractor : ResourceContentExtractor {
                     }
                 }
                 .map { html ->
-                    val body = Jsoup.parse(html).body().text()
+                    val body = Jsoup.parse(html, "", parser).body().text()
                     // Transform HTML entities into their actual characters.
                     Parser.unescapeEntities(body, false)
                 }
