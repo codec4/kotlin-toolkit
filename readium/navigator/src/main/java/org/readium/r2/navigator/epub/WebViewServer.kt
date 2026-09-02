@@ -254,15 +254,6 @@ internal class WebViewServer(
             }
         }
 
-    /**
-     * Allow the response to be consumed by publication documents served
-     * from any origin, including the package domain.
-     */
-    private fun WebResourceResponse.allowCors() {
-        responseHeaders = responseHeaders ?: mutableMapOf()
-        responseHeaders["Access-Control-Allow-Origin"] = "*"
-    }
-
     private fun serveErrorResponse(): WebResourceResponse {
         return serveResource(errorResource(), null, MediaType.XHTML)
     }
@@ -278,4 +269,14 @@ internal class WebViewServer(
             .setDomain(ASSETS_HOSTNAME)
             .addPathHandler("/", WebViewAssetLoader.AssetsPathHandler(application))
             .build()
+}
+
+/**
+ * Allows the response to be consumed by publication documents served from
+ * any origin, including the package domain.
+ */
+internal fun WebResourceResponse.allowCors() {
+    responseHeaders = responseHeaders.orEmpty().toMutableMap().apply {
+        put("Access-Control-Allow-Origin", "*")
+    }
 }
