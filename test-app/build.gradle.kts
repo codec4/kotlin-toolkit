@@ -61,8 +61,7 @@ android {
 
 kotlin {
     compilerOptions {
-        languageVersion = org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_2_3
-        freeCompilerArgs.add("-Xannotation-default-target=param-property")
+        languageVersion = org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_2_4
     }
 }
 
