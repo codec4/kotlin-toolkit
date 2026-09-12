@@ -479,6 +479,7 @@ public class EpubNavigatorFragment internal constructor(
     private lateinit var resourcesDouble: List<PageResource>
 
     internal var currentPagerPosition: Int = 0
+    private var selectingResourceForLocator = false
     internal lateinit var adapter: R2PagerAdapter
     private lateinit var currentActivity: FragmentActivity
 
@@ -590,7 +591,7 @@ public class EpubNavigatorFragment internal constructor(
 
     private inner class PageChangeListener : ViewPager.SimpleOnPageChangeListener() {
         override fun onPageSelected(position: Int) {
-            currentReflowablePageFragment?.webView?.let { webView ->
+            currentReflowablePageFragment?.webView?.takeUnless { selectingResourceForLocator }?.let { webView ->
                 if (viewModel.isScrollEnabled.value) {
                     if (currentPagerPosition < position) {
                         // handle swipe LEFT
@@ -771,12 +772,20 @@ public class EpubNavigatorFragment internal constructor(
             } ?: return
             val (index, _) = page
 
+            if (resourcePager.currentItem != index) {
+                // A locator owns its in-resource position. Applying the swipe
+                // edge first can move native scroll ahead of Chromium, making
+                // the locator's DOM scroll assignment incorrectly appear idle.
+                selectingResourceForLocator = true
+                try {
+                    resourcePager.currentItem = index
+                } finally {
+                    selectingResourceForLocator = false
+                }
+            }
             val loadSerial = r2PagerAdapter?.loadLocatorAt(index, locator)
             latestLocatorLoadTarget = loadSerial?.let { serial ->
                 LocatorLoadTarget(href = href, serial = serial)
-            }
-            if (resourcePager.currentItem != index) {
-                resourcePager.currentItem = index
             }
         }
 
