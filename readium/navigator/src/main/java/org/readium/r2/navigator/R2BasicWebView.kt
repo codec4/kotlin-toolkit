@@ -193,16 +193,20 @@ internal open class R2BasicWebView(context: Context, attrs: AttributeSet) : WebV
 
     override fun onOverScrolled(scrollX: Int, scrollY: Int, clampedX: Boolean, clampedY: Boolean) {
         // Workaround addressing a bug in the Android WebView where the viewport is scrolled while
-        // dragging the text selection handles.
+        // dragging the text selection handles. It only affects paginated mode.
         // See https://github.com/readium/kotlin-toolkit/issues/325
-        if (isSelecting) {
-            return
-        }
+        val allowed = SelectionScrollPolicy.allowedOverScroll(
+            isSelecting = isSelecting,
+            scrollMode = scrollMode,
+            verticalText = listener?.verticalText == true,
+            current = WebViewScrollOffset(this.scrollX, this.scrollY),
+            requested = WebViewScrollOffset(scrollX, scrollY),
+        ) ?: return
 
         if (callback != null) {
-            callback?.onOverScrolled(scrollX, scrollY, clampedX, clampedY)
+            callback?.onOverScrolled(allowed.x, allowed.y, clampedX, clampedY)
         }
-        super.onOverScrolled(scrollX, scrollY, clampedX, clampedY)
+        super.onOverScrolled(allowed.x, allowed.y, clampedX, clampedY)
     }
 
     override fun onScrollChanged(l: Int, t: Int, oldl: Int, oldt: Int) {
