@@ -43,6 +43,7 @@ import org.readium.r2.navigator.ScrollModeResourceTurnGesturePolicy
 import org.readium.r2.navigator.databinding.ReadiumNavigatorViewpagerFragmentEpubBinding
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
 import org.readium.r2.navigator.epub.EpubNavigatorViewModel
+import org.readium.r2.navigator.epub.scrollsToTarget
 import org.readium.r2.navigator.extensions.htmlId
 import org.readium.r2.navigator.preferences.ReadingProgression
 import org.readium.r2.shared.ExperimentalReadiumApi
@@ -484,7 +485,7 @@ internal class R2EpubPageFragment : Fragment() {
         readingProgression: ReadingProgression,
         locator: Locator,
     ) {
-        if (locator.text.highlight != null) {
+        if (locator.scrollsToTarget()) {
             if (webView.scrollToLocator(locator)) {
                 return
             }

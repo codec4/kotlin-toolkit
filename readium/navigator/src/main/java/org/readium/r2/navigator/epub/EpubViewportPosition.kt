@@ -10,6 +10,7 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 import org.json.JSONObject
 import org.readium.r2.shared.publication.Locator
+import org.readium.r2.shared.publication.html.cssSelector
 
 private const val NATIVE_SCROLL_LOCATION_KEY = "quoteNoteNativeScroll"
 private const val VIEWPORT_ANCHOR_LOCATION_KEY = "quoteNoteViewportAnchor"
@@ -200,6 +201,15 @@ public data class EpubPrecisePositionRestoreResult(
 public fun Locator.hasEpubPrecisePosition(): Boolean =
     EpubViewportAnchor.fromLocator(this) != null ||
         EpubNativeScrollSnapshot.fromLocator(this) != null
+
+/**
+ * Whether loading this locator in its resource scrolls to the DOM range it targets: its quoted text,
+ * or the element its CSS selector names when that element is all it targets, such as a picture kept
+ * as a quote. A precise position is restored from its own anchor, and any other locator from its
+ * progression, so the selector of a position's first visible element does not move it.
+ */
+internal fun Locator.scrollsToTarget(): Boolean =
+    text.highlight != null || (locations.cssSelector != null && !hasEpubPrecisePosition())
 
 public fun EpubNativeScrollSnapshot.isAtResourceStart(tolerancePx: Int = 1): Boolean =
     scrollX <= tolerancePx && scrollY <= tolerancePx
