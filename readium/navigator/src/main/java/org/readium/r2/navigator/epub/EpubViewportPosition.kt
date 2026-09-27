@@ -349,9 +349,11 @@ private fun EpubNativeScrollSnapshot.viewportMatches(
 private fun locationValueObject(value: Any): JSONObject? =
     when (value) {
         is JSONObject -> value
-        is Map<*, *> -> JSONObject(value.entries.associate { (key, entryValue) ->
-            key.toString() to entryValue
-        })
+        is Map<*, *> -> JSONObject(
+            value.entries.associate { (key, entryValue) ->
+                key.toString() to entryValue
+            }
+        )
         else -> null
     }
 

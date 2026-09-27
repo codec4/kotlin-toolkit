@@ -1274,13 +1274,17 @@ public class EpubNavigatorFragment internal constructor(
 
     private fun nativeScrollSnapshot(webView: R2WebView): EpubNativeScrollSnapshot? {
         val contentHeight = readerWebViewContentHeight(webView)
-        val vertical = webView.scrollMode && (webView.scrollY != 0 ||
-            webView.canScrollVertically(1) ||
-            webView.canScrollVertically(-1))
-        val horizontal = !vertical && (!webView.scrollMode ||
-            webView.scrollX != 0 ||
-            webView.canScrollHorizontally(1) ||
-            webView.canScrollHorizontally(-1))
+        val vertical = webView.scrollMode && (
+            webView.scrollY != 0 ||
+                webView.canScrollVertically(1) ||
+                webView.canScrollVertically(-1)
+            )
+        val horizontal = !vertical && (
+            !webView.scrollMode ||
+                webView.scrollX != 0 ||
+                webView.canScrollHorizontally(1) ||
+                webView.canScrollHorizontally(-1)
+            )
         val axis = when {
             vertical -> "vertical"
             horizontal -> "horizontal"

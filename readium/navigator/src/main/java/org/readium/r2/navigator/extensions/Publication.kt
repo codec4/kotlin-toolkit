@@ -9,9 +9,9 @@
 
 package org.readium.r2.navigator.extensions
 
-import kotlinx.coroutines.runBlocking
 import java.util.Collections
 import java.util.WeakHashMap
+import kotlinx.coroutines.runBlocking
 import org.readium.r2.shared.DelicateReadiumApi
 import org.readium.r2.shared.publication.Locator
 import org.readium.r2.shared.publication.Publication
