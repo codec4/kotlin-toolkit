@@ -237,6 +237,19 @@ public fun Locator.withoutEpubPrecisePosition(): Locator {
     )
 }
 
+/**
+ * The publication's progression for a viewport. A position's `totalProgression` counts from the
+ * position's start, and a web view reads its place from the top of its viewport, so the end of
+ * the book would never reach 1.0: a short book ended at 50%. Once the last resource can move no
+ * further, the book is read to its end.
+ */
+internal fun epubTotalProgressionAtViewport(
+    positionTotalProgression: Double?,
+    isLastResource: Boolean,
+    atResourceEnd: Boolean,
+): Double? =
+    if (isLastResource && atResourceEnd) 1.0 else positionTotalProgression
+
 internal fun epubNativeScrollSnapshotProgression(
     scrollMode: Boolean,
     scrollY: Int,

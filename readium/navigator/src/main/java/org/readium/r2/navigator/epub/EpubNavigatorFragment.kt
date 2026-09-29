@@ -1874,12 +1874,20 @@ public class EpubNavigatorFragment internal constructor(
                 positions.getOrNull(index)
             }
 
+            val positionLocations = positionLocator?.locations ?: Locator.Locations()
+            val totalProgression = epubTotalProgressionAtViewport(
+                positionTotalProgression = positionLocations.totalProgression,
+                isLastResource = resourcePager.currentItem == adapter.count - 1,
+                // A fixed-layout page shows its whole resource.
+                atResourceEnd = reflowableWebView?.isAtResourceEnd ?: true,
+            )
             val currentLocator = Locator(
                 href = link.url(),
                 mediaType = link.mediaType ?: MediaType.XHTML,
                 title = tableOfContentsTitleByHref[link.href] ?: positionLocator?.title ?: link.title,
-                locations = (positionLocator?.locations ?: Locator.Locations()).copy(
-                    progression = progression
+                locations = positionLocations.copy(
+                    progression = progression,
+                    totalProgression = totalProgression,
                 ),
                 text = positionLocator?.text ?: Locator.Text()
             )

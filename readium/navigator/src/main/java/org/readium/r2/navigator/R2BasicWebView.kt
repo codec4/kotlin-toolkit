@@ -183,6 +183,17 @@ internal open class R2BasicWebView(context: Context, attrs: AttributeSet) : WebV
         }
     }
 
+    /**
+     * Whether the viewport has reached the end of the resource in reading order: the bottom in
+     * scroll mode, or the last page, whichever way the resource reads.
+     */
+    val isAtResourceEnd: Boolean get() = when {
+        scrollMode && listener?.verticalText == true -> !canScrollHorizontally(-1)
+        scrollMode -> !canScrollVertically(1)
+        listener?.readingProgression == ReadingProgression.RTL -> !canScrollHorizontally(-1)
+        else -> !canScrollHorizontally(1)
+    }
+
     interface OnOverScrolledCallback {
         fun onOverScrolled(scrollX: Int, scrollY: Int, clampedX: Boolean, clampedY: Boolean)
     }

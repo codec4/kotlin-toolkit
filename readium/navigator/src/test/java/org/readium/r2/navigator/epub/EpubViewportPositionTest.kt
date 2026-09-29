@@ -45,4 +45,28 @@ class EpubViewportPositionTest {
             ),
         )
     }
+
+    @Test
+    fun theEndOfTheLastResourceReadsTheWholeBook() {
+        assertEquals(
+            1.0,
+            epubTotalProgressionAtViewport(positionTotalProgression = 0.5, isLastResource = true, atResourceEnd = true),
+        )
+    }
+
+    @Test
+    fun theLastResourceShortOfItsEndKeepsItsPosition() {
+        assertEquals(
+            0.5,
+            epubTotalProgressionAtViewport(positionTotalProgression = 0.5, isLastResource = true, atResourceEnd = false),
+        )
+    }
+
+    @Test
+    fun theEndOfAnEarlierResourceKeepsItsPosition() {
+        assertEquals(
+            0.25,
+            epubTotalProgressionAtViewport(positionTotalProgression = 0.25, isLastResource = false, atResourceEnd = true),
+        )
+    }
 }
