@@ -16,7 +16,6 @@ fileGroups:
     - 'readium/shared/**/*'
     - 'readium/streamer/**/*'
     - 'readium/navigator/**/*'
-    - 'readium/adapters/pdfium/**/*'
 
 tasks:
   navigator-compile:
@@ -24,9 +23,7 @@ tasks:
       ./gradlew \
         :readium:readium-shared:compileDebugKotlin \
         :readium:readium-streamer:compileDebugKotlin \
-        :readium:readium-navigator:compileDebugKotlin \
-        :readium:adapters:pdfium:readium-adapter-pdfium-document:compileDebugKotlin \
-        :readium:adapters:pdfium:readium-adapter-pdfium-navigator:compileDebugKotlin
+        :readium:readium-navigator:compileDebugKotlin
     inputs:
       - '@globs(gradle)'
       - '@globs(focusedSources)'
@@ -38,9 +35,7 @@ tasks:
       ./gradlew \
         :readium:readium-shared:check \
         :readium:readium-streamer:check \
-        :readium:readium-navigator:check \
-        :readium:adapters:pdfium:readium-adapter-pdfium-document:check \
-        :readium:adapters:pdfium:readium-adapter-pdfium-navigator:check
+        :readium:readium-navigator:check
     inputs:
       - '@globs(gradle)'
       - '@globs(focusedSources)'
